@@ -1,0 +1,1307 @@
+
+****Codigo modificado asignación Paso 1*******
+
+Sub FijarBotones()
+
+    Dim ws As Worksheet
+    Dim shp As Shape
+
+    For Each ws In ThisWorkbook.Worksheets
+        For Each shp In ws.Shapes
+            shp.Placement = xlFreeFloating ' No mover ni cambiar tamaño con celdas
+        Next shp
+    Next ws
+
+    MsgBox "Todos los botones han sido fijados y ya no se moverán con filtros u ordenamientos.", vbInformation
+
+End Sub
+Sub inicio()
+    'Botones para ocultar hojas
+    Application.ScreenUpdating = False
+    Worksheets("INICIO").Visible = True
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("ANALISTAS").Visible = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+    Worksheets("ASIGNACION").Visible = False
+
+End Sub
+
+Sub base_total()
+
+    Application.ScreenUpdating = False
+    Worksheets("BASE TOTAL").Visible = True
+    Worksheets("INICIO").Visible = False
+    Worksheets("ANALISTAS").Visible = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+    Worksheets("ASIGNACION").Visible = False
+
+End Sub
+
+Sub analistas()
+
+    Application.ScreenUpdating = False
+    Worksheets("ANALISTAS").Visible = True
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("INICIO").Visible = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+    Worksheets("ASIGNACION").Visible = False
+
+End Sub
+
+Sub Actividades_complementarias()
+
+    'Botones para ocultar hojas
+    Application.ScreenUpdating = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = True
+    Worksheets("ANALISTAS").Visible = False
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("INICIO").Visible = False
+    Worksheets("ASIGNACION").Visible = False
+
+End Sub
+
+Sub Asignacion()
+    
+    Application.ScreenUpdating = False
+    Worksheets("ASIGNACION").Visible = True
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+    Worksheets("ANALISTAS").Visible = False
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("INICIO").Visible = False
+    
+End Sub
+
+Sub Principal()
+
+    Call EliminarCajamag
+    Call OrdenarBasePorFechaYCaja
+    Call AsignarCAFAMyCOMPENSAROrdenado
+    Call AsignarCajasAdministradores_OTRAS
+    Call CopiarRadicadosPorUsuario
+    
+    MsgBox "Asignación completa cargue informacion en ZENITH", vbInformation
+    
+End Sub
+
+Sub EliminarCajamag()
+
+    Dim ws As Worksheet
+    Dim i As Long
+    Dim ultimaFila As Long
+    Dim encontrado As Boolean
+
+    Set ws = ThisWorkbook.Sheets("BASE TOTAL")
+    ultimaFila = ws.Cells(ws.Rows.Count, "D").End(xlUp).Row
+    encontrado = False
+
+    Application.ScreenUpdating = False
+
+    For i = ultimaFila To 7 Step -1 ' Asume encabezados en fila 1
+        If Trim(UCase(ws.Cells(i, "D").Value)) = "CAJAMAG" Then
+            ws.Rows(i).Delete
+            encontrado = True
+        End If
+    Next i
+
+    Application.ScreenUpdating = True
+
+    If encontrado Then
+        MsgBox "Todas las filas con CAJAMAG fueron eliminadas correctamente.", vbInformation
+    Else
+        MsgBox "No se encontró CAJAMAG en la base.", vbExclamation
+    End If
+
+End Sub
+
+Sub OrdenarBasePorFechaYCaja()
+
+    Dim ws As Worksheet
+    Dim ultimaFila As Long
+    Dim rangoOrdenar As Range
+    Dim rangoSinCAFAM As Range
+    
+    Set ws = ThisWorkbook.Sheets("BASE TOTAL")
+    ultimaFila = ws.Cells(ws.Rows.Count, "D").End(xlUp).Row
+    
+    Set rangoOrdenar = ws.Range("D6").Resize(ultimaFila, ws.Cells(6, ws.Columns.Count).End(xlToLeft).Column)
+    
+    Application.ScreenUpdating = False
+    
+    ' ====== Paso 1: Ordenar TODAS las cajas por fecha y caja (como la lógica inicial) ======
+    With ws.Sort
+        .SortFields.Clear
+        .SortFields.Add2 Key:=ws.Range("J7:J" & ultimaFila), _
+                         SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+        .SortFields.Add2 Key:=ws.Range("D7:D" & ultimaFila), _
+                         SortOn:=xlSortOnValues, Order:=xlAscending, _
+                         CustomOrder:="COMPENSAR", DataOption:=xlSortNormal
+        .SetRange rangoOrdenar
+        .Header = xlYes
+        .Orientation = xlTopToBottom
+        .Apply
+    End With
+    
+    ' ====== Paso 2: Mover CAFAM al inicio (excepción especial) ======
+    Dim i As Long, nextRow As Long
+    nextRow = 7 ' primera fila después de encabezados
+    
+    For i = 7 To ultimaFila
+        If ws.Cells(i, 4).Value = "CAFAM" Then
+            ws.Rows(i).Cut
+            ws.Rows(nextRow).Insert Shift:=xlDown
+            nextRow = nextRow + 1
+        End If
+    Next i
+    
+    Application.CutCopyMode = False
+    Application.ScreenUpdating = True
+    
+    MsgBox "CAFAM quedó de primeras (excepción) y el resto sigue la lógica inicial.", vbInformation
+
+End Sub
+
+
+Sub AsignarCAFAMyCOMPENSAROrdenado()
+
+    Dim wsBase As Worksheet, wsAnalistas As Worksheet
+    Dim ultimaFilaBase As Long, ultimaFilaAnalistas As Long
+    Dim i As Long, j As Long
+    Dim dictCapacidad As Object, dictRoles As Object, dictRestricciones As Object
+    Dim cajasAsignar As Variant, cajaActual As Variant
+    Dim totalCapacidad As Long, filaAsignar As Long, cantidadAsignar As Long
+    Dim analistasDisponibles As Collection
+    Dim analista As Variant, cajaFila As String, yaAsignados As Object
+    Dim rolesValidos As Variant
+    
+    Set wsBase = ThisWorkbook.Sheets("BASE TOTAL")
+    Set wsAnalistas = ThisWorkbook.Sheets("ANALISTAS")
+    
+    ' Calcular la suma total de capacidad ajustada (columna K)
+    ultimaFilaAnalistas = wsAnalistas.Cells(wsAnalistas.Rows.Count, "D").End(xlUp).Row
+    For i = 7 To ultimaFilaAnalistas
+        If IsNumeric(wsAnalistas.Cells(i, "K").Value) Then
+            totalCapacidad = totalCapacidad + CLng(wsAnalistas.Cells(i, "K").Value)
+        End If
+    Next i
+    
+    Set dictCapacidad = CreateObject("Scripting.Dictionary")
+    Set dictRoles = CreateObject("Scripting.Dictionary")
+    Set dictRestricciones = CreateObject("Scripting.Dictionary")
+    Set yaAsignados = CreateObject("Scripting.Dictionary")
+    
+    rolesValidos = Array("ADMINISTRADOR", "PRIORITARIO")
+    cajasAsignar = Array("CAFAM", "COMPENSAR")
+    
+    ' Leer analistas y construir diccionarios
+    For i = 7 To ultimaFilaAnalistas
+        analista = Trim(wsAnalistas.Cells(i, "D").Value)
+        
+        If analista <> "" Then
+            dictCapacidad(analista) = wsAnalistas.Cells(i, "K").Value
+            dictRoles(analista & "_CAFAM") = LCase(wsAnalistas.Cells(i, "G").Value)
+            dictRoles(analista & "_COMPENSAR") = LCase(wsAnalistas.Cells(i, "H").Value)
+            dictRestricciones(analista) = "," & Replace(UCase(wsAnalistas.Cells(i, "N").Value), " ", "") & ","
+        
+        
+        End If
+    Next i
+    
+    ' Recorrer cada caja
+    For Each cajaActual In cajasAsignar
+        
+    Set analistasDisponibles = New Collection
+        
+        ' 1. Filtrar analistas con capacidad y rol adecuado
+    For Each analista In dictCapacidad.Keys
+            
+            If dictCapacidad(analista) > 0 Then
+                Dim rolCaja As String
+                rolCaja = dictRoles(analista & "_" & cajaActual)
+                
+                If rolCaja = "administrador" Or rolCaja = "prioritario" Then
+                    If InStr(dictRestricciones(analista), "," & UCase(cajaActual) & ",") = 0 Then
+                        analistasDisponibles.Add analista
+                        
+                    End If
+                End If
+            End If
+        Next analista
+        
+        ' 2. Mezclar aleatoriamente analistas
+        Dim indices() As Long
+        ReDim indices(1 To analistasDisponibles.Count)
+        For i = 1 To analistasDisponibles.Count
+            indices(i) = i
+        Next i
+        
+        Call MezclarArray(indices)
+        
+        ' 3. Recorrer base y asignar radicados de esa caja
+        filaAsignar = 7
+        If UCase(cajaActual) = "CAFAM" Then
+            ' --- EXCEPCIÓN CAFAM: asignación en BLOQUE ---
+            Dim radicadosCAFAM As Collection
+            Set radicadosCAFAM = New Collection
+            For filaAsignar = 7 To wsBase.Cells(wsBase.Rows.Count, "D").End(xlUp).Row
+                If wsBase.Cells(filaAsignar, "O").Value = "" And UCase(Trim(wsBase.Cells(filaAsignar, "D").Value)) = "CAFAM" Then
+                    radicadosCAFAM.Add filaAsignar
+                End If
+            Next filaAsignar
+            
+            Dim totalAnalistasCAFAM As Long, radicadosPorAnalista As Long, resto As Long, idx As Long, startIdx As Long
+            totalAnalistasCAFAM = analistasDisponibles.Count
+            If totalAnalistasCAFAM > 0 Then
+                radicadosPorAnalista = radicadosCAFAM.Count \ totalAnalistasCAFAM
+                resto = radicadosCAFAM.Count Mod totalAnalistasCAFAM
+                idx = 1
+                startIdx = 1
+                
+                ' Asignar bloques completos
+                For i = 1 To totalAnalistasCAFAM
+                    Dim finIdx As Long
+                    finIdx = startIdx + radicadosPorAnalista - 1
+                    If i <= resto Then finIdx = finIdx + 1 ' repartir resto
+                    
+                    For j = startIdx To finIdx
+                        If dictCapacidad(analistasDisponibles(i)) > 0 Then
+                           wsBase.Cells(radicadosCAFAM(j), "O").Value = analistasDisponibles(i)
+                           dictCapacidad(analistasDisponibles(i)) = dictCapacidad(analistasDisponibles(i)) - 1
+                        Else
+                        
+                           Exit For ' ya no tiene más capacidad
+                           
+                        End If
+                        
+                    Next j
+                    
+                    startIdx = finIdx + 1
+                Next i
+            End If
+            
+        Else
+            ' --- Lógica original para COMPENSAR ---
+            cantidadAsignar = IIf(cajaActual = "CAFAM", 0, 60)
+            
+            For i = 1 To UBound(indices)
+                analista = analistasDisponibles(indices(i))
+                Dim capacidadRestante As Long
+                capacidadRestante = dictCapacidad(analista)
+                If capacidadRestante <= 0 Then GoTo ProximoAnalista
+                
+                Dim asignados As Long: asignados = 0
+                For filaAsignar = 7 To totalCapacidad + 1
+                    cajaFila = Trim(wsBase.Cells(filaAsignar, "D").Value)
+                    If wsBase.Cells(filaAsignar, "O").Value = "" And UCase(cajaFila) = cajaActual Then
+                        If InStr(dictRestricciones(analista), "," & UCase(cajaFila) & ",") = 0 Then
+                            wsBase.Cells(filaAsignar, "O").Value = analista
+                            asignados = asignados + 1
+                            capacidadRestante = capacidadRestante - 1
+                            dictCapacidad(analista) = capacidadRestante
+                            If asignados >= cantidadAsignar Or capacidadRestante <= 0 Then Exit For
+                        End If
+                    End If
+                Next filaAsignar
+ProximoAnalista:
+            Next i
+        End If
+        
+    Next cajaActual
+
+    ' === ACTUALIZAR CAPACIDAD FINAL EN LA HOJA ANALISTAS ===
+    For i = 7 To ultimaFilaAnalistas
+        analista = Trim(wsAnalistas.Cells(i, "D").Value)
+        If dictCapacidad.Exists(analista) Then
+            wsAnalistas.Cells(i, "L").Value = dictCapacidad(analista)
+        End If
+    Next i
+
+End Sub
+
+
+Sub MezclarArray(ByRef arr() As Long)
+    Dim i As Long, j As Long, temp As Long
+    Randomize
+    For i = UBound(arr) To LBound(arr) + 1 Step -1
+        j = Int((i - LBound(arr) + 1) * Rnd + LBound(arr))
+        temp = arr(i)
+        arr(i) = arr(j)
+        arr(j) = temp
+    Next i
+End Sub
+    
+
+Sub AsignarCajasAdministradores_OTRAS()
+
+    Dim wsBase As Worksheet, wsAnalistas As Worksheet
+    Dim ultimaFilaBase As Long, ultimaFilaAnalistas As Long
+    Dim dictCapacidad As Object, dictAdmin As Object, dictRestricciones As Object
+    Dim analista As Variant, adminList As Variant, restricList As Variant
+    Dim caja As String, asignado As Boolean
+    Dim i As Long, j As Long
+    Dim totalCapacidad As Long
+
+    Set wsBase = ThisWorkbook.Sheets("BASE TOTAL")
+    Set wsAnalistas = ThisWorkbook.Sheets("ANALISTAS")
+    Set dictCapacidad = CreateObject("Scripting.Dictionary")
+    Set dictAdmin = CreateObject("Scripting.Dictionary")
+    Set dictRestricciones = CreateObject("Scripting.Dictionary")
+
+    ultimaFilaBase = wsBase.Cells(wsBase.Rows.Count, "D").End(xlUp).Row
+    ultimaFilaAnalistas = wsAnalistas.Cells(wsAnalistas.Rows.Count, "D").End(xlUp).Row
+
+    ' === 1. Cargar capacidades, administradores y restricciones ===
+    For i = 7 To ultimaFilaAnalistas
+        analista = wsAnalistas.Cells(i, "D").Value
+        dictCapacidad(analista) = wsAnalistas.Cells(i, "L").Value
+
+        ' Administradores (columna I)
+        adminList = Split(wsAnalistas.Cells(i, "I").Value, ",")
+        For j = LBound(adminList) To UBound(adminList)
+            caja = Trim(adminList(j))
+            If caja <> "" Then
+                If Not dictAdmin.Exists(caja) Then Set dictAdmin(caja) = New Collection
+                dictAdmin(caja).Add analista
+            End If
+        Next j
+
+        ' Restricciones (columna j)
+        restricList = Split(wsAnalistas.Cells(i, "J").Value, ",")
+        For j = LBound(restricList) To UBound(restricList)
+            caja_R = Trim(restricList(j))
+            If caja_R <> "" Then
+                dictRestricciones(analista & "|" & caja_R) = True
+            End If
+        Next j
+    Next i
+
+    ' === 2. Calcular total de capacidad ajustada ===
+    totalCapacidad = 0
+   For i = 7 To ultimaFilaAnalistas
+        If IsNumeric(wsAnalistas.Cells(i, "K").Value) Then
+            totalCapacidad = totalCapacidad + CLng(wsAnalistas.Cells(i, "K").Value)
+        End If
+   Next i
+
+    ' === 3. Recorrer solicitudes en BASE TOTAL hasta agotar la capacidad ===
+    Dim contadorAsignados As Long: contadorAsignados = 0
+    For i = 7 To (totalCapacidad + 8)
+
+        If contadorAsignados >= totalCapacidad Then Exit For ' No asignar más de la capacidad total
+
+        If wsBase.Cells(i, "O").Value = "" Then
+            caja = wsBase.Cells(i, "D").Value
+            asignado = False
+
+            ' 3.1 Asignar a administrador (que no tenga restricción)
+            If dictAdmin.Exists(caja) Then
+                For Each analista In dictAdmin(caja)
+                    If dictCapacidad(analista) > 0 And Not dictRestricciones.Exists(analista & "|" & caja) Then
+                        wsBase.Cells(i, "O").Value = analista
+                        dictCapacidad(analista) = dictCapacidad(analista) - 1
+                        asignado = True
+                        contadorAsignados = contadorAsignados + 1
+                        Exit For
+                    End If
+                Next analista
+            End If
+        End If
+    Next i
+      
+    For i = 7 To (totalCapacidad + 8)
+        If wsBase.Cells(i, "O").Value = "" Then
+            caja = wsBase.Cells(i, "D").Value
+            asignado = False
+            
+            ' 3.2 Si no se pudo por administrador, buscar cualquier otro sin restricción
+            If Not asignado Then
+                For Each analista In dictCapacidad.Keys
+                    If dictCapacidad(analista) > 0 And Not dictRestricciones.Exists(analista & "|" & caja) Then
+                        wsBase.Cells(i, "O").Value = analista
+                        dictCapacidad(analista) = dictCapacidad(analista) - 1
+                        contadorAsignados = contadorAsignados + 1
+                        Exit For
+                    End If
+                Next analista
+            End If
+        End If
+    Next i
+
+    ' === 4. Actualizar capacidades finales en hoja ANALISTAS ===
+    For i = 7 To ultimaFilaAnalistas
+        analista = wsAnalistas.Cells(i, "D").Value
+        If dictCapacidad.Exists(analista) Then
+            wsAnalistas.Cells(i, "L").Value = dictCapacidad(analista)
+        End If
+    Next i
+
+End Sub
+
+Sub DejarAsignaciondeldia()
+
+    Dim filaInicio As Long
+    Dim valorA18 As Variant
+    Dim wsOrigen As Worksheet
+    Dim wsDestino As Worksheet
+    Dim ultimaFila As Long
+
+    ' Establecer referencias a las hojas
+    Set wsOrigen = ThisWorkbook.Sheets("ACTIVIDADES COMPLEMENTARIAS")
+    Set wsDestino = ThisWorkbook.Sheets("BASE TOTAL")
+
+    ' Leer valor en A18
+    valorD24 = wsOrigen.Range("D24").Value
+    ' Validar que el valor en A18 sea numérico y positivo
+    If Not IsNumeric(valorD24) Or valorD24 <= 0 Then
+        MsgBox "El valor en D24 no es válido."
+        Exit Sub
+    End If
+
+    ' Calcular fila de inicio
+    filaInicio = CLng(valorD24) + 7
+
+    ' Obtener la última fila con datos en BASE TOTAL
+    ultimaFila = wsDestino.Cells(wsDestino.Rows.Count, 4).End(xlUp).Row
+
+    ' Validar que haya filas para eliminar
+    If filaInicio <= ultimaFila Then
+        wsDestino.Rows(filaInicio & ":" & ultimaFila).Delete
+        MsgBox "Filas eliminadas desde la fila " & filaInicio & " hasta la " & ultimaFila
+    Else
+        MsgBox "No hay filas que eliminar desde la fila " & filaInicio
+    End If
+
+End Sub
+
+Sub Depurar_Base()
+
+    Dim wsBase As Worksheet
+    Dim wsAct As Worksheet
+    Dim tbl As ListObject
+    Dim i As Long
+    Dim ultimaFila As Long
+
+    On Error GoTo ErrHandler
+
+    ' Referencia a las hojas
+    Set wsBase = ThisWorkbook.Worksheets("BASE TOTAL")
+    Set wsAct = ThisWorkbook.Worksheets("ACTIVIDADES COMPLEMENTARIAS")
+
+    ' Referencia a la tabla en BASE TOTAL
+    Set tbl = wsBase.ListObjects("BASE_TOTAL_ASIG")
+
+    ' Mejorar rendimiento mientras corre
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    ' Si la tabla tiene datos, eliminar todas sus filas de datos (de abajo hacia arriba)
+    If Not tbl.DataBodyRange Is Nothing Then
+        For i = tbl.ListRows.Count To 1 Step -1
+            tbl.ListRows(i).Delete
+        Next i
+    End If
+
+    ' Limpiar solo columnas F y G de la hoja ACTIVIDADES COMPLEMENTARIAS
+    ultimaFila = wsAct.Cells(wsAct.Rows.Count, "F").End(xlUp).Row
+    If ultimaFila >= 8 Then
+        wsAct.Range("F8:G" & ultimaFila).ClearContents
+    End If
+
+    MsgBox "Se depuró la información de las Hojas BASE TOTAL y ACTIVIDADES COMPLEMENTARIAS", vbInformation
+
+Cleanup:
+    ' Restaurar configuración
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+    Exit Sub
+
+ErrHandler:
+    MsgBox "Error " & Err.Number & ": " & Err.Description, vbCritical
+    Resume Cleanup
+
+End Sub
+
+
+Sub ImportarDatosABaseTotal()
+    Dim wsDestino As Worksheet
+    Dim wbOrigen As Workbook
+    Dim wsOrigen As Worksheet
+    Dim rutaArchivo As Variant
+    Dim ultimaFila As Long, ultimaCol As Long
+    Dim celda As Range
+    
+    ' Establecer hoja destino
+    Set wsDestino = ThisWorkbook.Sheets("BASE TOTAL")
+    
+    ' Seleccionar archivo origen
+    rutaArchivo = Application.GetOpenFilename( _
+        Title:="Seleccione el archivo origen", _
+        FileFilter:="Archivos de Excel (*.xls*), *.xls*")
+    
+    ' Si el usuario cancela
+    If rutaArchivo = False Then
+        MsgBox "Operación cancelada."
+        Exit Sub
+    End If
+    
+    ' Abrir archivo origen en solo lectura
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Set wbOrigen = Workbooks.Open(Filename:=rutaArchivo, ReadOnly:=True)
+    
+    ' Usar la primera hoja del archivo origen
+    Set wsOrigen = wbOrigen.Sheets(1)
+    
+    ' Encontrar última fila y última columna con datos en origen
+    Set celda = wsOrigen.Cells.Find("*", SearchOrder:=xlByRows, SearchDirection:=xlPrevious)
+    If celda Is Nothing Then
+        MsgBox "La hoja de origen está vacía."
+    Else
+        ultimaFila = celda.Row
+        ultimaCol = wsOrigen.Cells.Find("*", SearchOrder:=xlByColumns, SearchDirection:=xlPrevious).Column
+        
+        ' Copiar solo el rango de datos (no filas completas)
+        If ultimaFila > 1 Then
+            wsOrigen.Range(wsOrigen.Cells(2, 1), wsOrigen.Cells(ultimaFila, ultimaCol)).Copy
+            wsDestino.Range("D7").PasteSpecial Paste:=xlPasteValues
+            MsgBox "Datos importados desde " & wbOrigen.Name
+        Else
+            MsgBox "No hay datos para copiar en el archivo origen."
+        End If
+    End If
+    
+    ' Cerrar archivo origen sin guardar cambios
+    wbOrigen.Close SaveChanges:=False
+    
+    ' Restaurar configuración
+    Application.CutCopyMode = False
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+End Sub
+
+
+Sub CopiarRadicadosPorUsuario()
+    Dim wsBase As Worksheet, wsAsig As Worksheet
+    Dim ultimaFilaBase As Long, ultimaFilaAsig As Long
+    Dim i As Long, j As Long
+    Dim usuario As String
+    Dim radicados As String
+    
+    ' Definir hojas
+    Set wsBase = ThisWorkbook.Sheets("BASE TOTAL")
+    Set wsAsig = ThisWorkbook.Sheets("ASIGNACION")
+    
+    ' Últimas filas
+    ultimaFilaBase = wsBase.Cells(wsBase.Rows.Count, "L").End(xlUp).Row
+    ultimaFilaAsig = wsAsig.Cells(wsAsig.Rows.Count, "C").End(xlUp).Row
+    
+    ' Limpiar columna B antes de empezar
+    wsAsig.Range("D7:D" & ultimaFilaAsig).ClearContents
+    
+    ' Recorro usuarios de ASIGNACION
+    For i = 7 To ultimaFilaAsig
+        usuario = Trim(wsAsig.Cells(i, "C").Value)
+        radicados = ""
+        
+        ' Buscar en BASE TOTAL todos los radicados de ese usuario
+        For j = 7 To ultimaFilaBase
+            If Trim(wsBase.Cells(j, "O").Value) = usuario Then
+                If radicados = "" Then
+                    radicados = wsBase.Cells(j, "L").Value
+                Else
+                    radicados = radicados & "," & wsBase.Cells(j, "L").Value
+                End If
+            End If
+        Next j
+        
+        ' Colocar en columna B
+        wsAsig.Cells(i, "D").Value = radicados
+    Next i
+    
+    MsgBox "Proceso terminado. Radicados copiados a la hoja ASIGNACION.", vbInformation
+End Sub
+
+Sub ContarSolicitudesPorFechaYEntidad()
+    Dim ws As Worksheet
+    Dim ultimaFila As Long
+    Dim rngFechas As Range, rngEstados As Range
+    Dim fechaBuscar As Variant
+    Dim contadorRadicado As Long, contadorRevision As Long
+    
+    ' ---- Parte 1: Fecha y Estado ----
+    Set ws = ThisWorkbook.Sheets("BASE TOTAL") ' Cambia "Hoja1" por tu hoja de fechas/estados
+    ultimaFila = ws.Cells(ws.Rows.Count, "J").End(xlUp).Row
+    
+    Set rngFechas = ws.Range("J7:J" & ultimaFila)
+    Set rngEstados = ws.Range("K7:K" & ultimaFila)
+    
+    fechaBuscar = InputBox("Ingrese la fecha ANS que desea contar (ejemplo: 01/01/2024)", "Fecha ANS")
+    
+    If Not IsDate(fechaBuscar) Then
+        MsgBox "La entrada no es una fecha válida.", vbExclamation, "Error"
+        Exit Sub
+    End If
+    
+    contadorRadicado = Application.WorksheetFunction.CountIfs(rngFechas, CDate(fechaBuscar), rngEstados, "RADICADO")
+    contadorRevision = Application.WorksheetFunction.CountIfs(rngFechas, CDate(fechaBuscar), rngEstados, "REVISION")
+    
+    
+    ' ---- Parte 2: CAFAM y COMPENSAR ----
+    Dim wsBase As Worksheet
+    Dim ultimaFilaBase As Long
+    Dim i As Long
+    Dim contadorCAFAM As Long, contadorCOMPENSAR As Long
+    Dim valorCelda As String
+    
+    Set wsBase = ThisWorkbook.Sheets("BASE TOTAL")
+    ultimaFilaBase = wsBase.Cells(wsBase.Rows.Count, "D").End(xlUp).Row
+    
+    For i = 2 To ultimaFilaBase ' Empieza en fila 2 para saltar encabezado
+        valorCelda = Trim(UCase(wsBase.Cells(i, "D").Value))
+        
+        If valorCelda = "CAFAM" Then
+            contadorCAFAM = contadorCAFAM + 1
+        ElseIf valorCelda = "COMPENSAR" Then
+            contadorCOMPENSAR = contadorCOMPENSAR + 1
+        End If
+    Next i
+    
+    
+    ' ---- Suma final obligatoria ----
+    Dim totalObligatorio As Long
+    totalObligatorio = contadorRadicado + contadorRevision + contadorCAFAM
+    
+    
+    ' ---- Mostrar resultados ----
+    MsgBox "Resultados para la fecha " & CDate(fechaBuscar) & ":" & vbCrLf & vbCrLf & _
+           "RADICADO: " & contadorRadicado & vbCrLf & _
+           "REVISION: " & contadorRevision & vbCrLf & _
+           "CAFAM: " & contadorCAFAM & vbCrLf & _
+           "COMPENSAR: " & contadorCOMPENSAR & vbCrLf & vbCrLf & _
+           "Obligatorio Asignar (ANS y CAFAM): " & totalObligatorio, vbInformation, "Reporte Consolidado"
+End Sub
+
+****Codigo modificado asignación Paso 2*******
+
+
+Sub FijarBotones()
+
+    Dim ws As Worksheet
+    Dim shp As Shape
+
+    For Each ws In ThisWorkbook.Worksheets
+        For Each shp In ws.Shapes
+            shp.Placement = xlFreeFloating ' No mover ni cambiar tamaño con celdas
+        Next shp
+    Next ws
+
+    MsgBox "Todos los botones han sido fijados y ya no se moverán con filtros u ordenamientos.", vbInformation
+
+End Sub
+Sub INICIO()
+
+    'Botones para ocultar hojas
+    Application.ScreenUpdating = False
+    
+    Worksheets("INICIO").Visible = True
+    Worksheets("ASIG").Visible = False
+    Worksheets("BASE_ASIG").Visible = False
+    Worksheets("ASIG TOTAL").Visible = False
+    Worksheets("TOTAL").Visible = False
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+
+End Sub
+
+Sub ASIG()
+
+    Application.ScreenUpdating = False
+    
+    Worksheets("ASIG").Visible = True
+    Worksheets("INICIO").Visible = False
+    Worksheets("BASE_ASIG").Visible = False
+    Worksheets("ASIG TOTAL").Visible = False
+    Worksheets("TOTAL").Visible = False
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+End Sub
+
+Sub BASE_ASIG()
+
+    Application.ScreenUpdating = False
+    
+    Worksheets("BASE_ASIG").Visible = True
+    Worksheets("ASIG").Visible = False
+    Worksheets("INICIO").Visible = False
+    Worksheets("ASIG TOTAL").Visible = False
+    Worksheets("TOTAL").Visible = False
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+
+End Sub
+
+Sub ASIG_TOTAL()
+
+    'Botones para ocultar hojas
+    Application.ScreenUpdating = False
+    
+    Worksheets("ASIG TOTAL").Visible = True
+    Worksheets("BASE_ASIG").Visible = False
+    Worksheets("ASIG").Visible = False
+    Worksheets("INICIO").Visible = False
+    Worksheets("TOTAL").Visible = False
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+
+End Sub
+
+Sub TOTAL()
+
+    'Botones para ocultar hojas
+    Application.ScreenUpdating = False
+    
+    Worksheets("TOTAL").Visible = True
+    Worksheets("ASIG TOTAL").Visible = False
+    Worksheets("BASE_ASIG").Visible = False
+    Worksheets("ASIG").Visible = False
+    Worksheets("INICIO").Visible = False
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+
+End Sub
+
+Sub BASE_TOTAL()
+
+    'Botones para ocultar hojas
+    Application.ScreenUpdating = False
+    
+    Worksheets("BASE TOTAL").Visible = True
+    Worksheets("TOTAL").Visible = False
+    Worksheets("ASIG TOTAL").Visible = False
+    Worksheets("BASE_ASIG").Visible = False
+    Worksheets("ASIG").Visible = False
+    Worksheets("INICIO").Visible = False
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = False
+
+End Sub
+
+Sub Actividades_complementarias()
+
+    'Botones para ocultar hojas
+    Application.ScreenUpdating = False
+    
+    Worksheets("ACTIVIDADES COMPLEMENTARIAS").Visible = True
+    Worksheets("BASE TOTAL").Visible = False
+    Worksheets("TOTAL").Visible = False
+    Worksheets("ASIG TOTAL").Visible = False
+    Worksheets("BASE_ASIG").Visible = False
+    Worksheets("ASIG").Visible = False
+    Worksheets("INICIO").Visible = False
+    
+
+End Sub
+
+
+Sub TRAERDATOS()
+    On Error GoTo ErrHandler
+
+    Dim wsDestino As Worksheet
+    Dim wsother As Worksheet
+    Dim wbOrigen As Workbook
+    Dim wsOrigen As Worksheet
+    Dim rutaArchivo As Variant
+    Dim ultimaFilaOrigen As Long
+    Dim ultimaColOrigen As Long
+    Dim ultimaFila As Long
+    Dim src As Range
+    Dim dst As Range
+    Dim filasSrc As Long, colsSrc As Long
+    Dim ws As Worksheet
+    Dim i As Long
+    Dim encontrado As Boolean
+    
+    ' Establecer hojas destino (validar existencia)
+    Set wsDestino = ThisWorkbook.Sheets("BASE_TOTAL")
+    Set wsother = ThisWorkbook.Sheets("BASE_ASIG")
+       
+    ' --- LIMPIAR DATOS EN BASE_TOTAL (desde D8 hacia la derecha) ---
+    If Application.WorksheetFunction.CountA(wsDestino.Range("D:D")) > 0 Then
+        ultimaFila = wsDestino.Cells(wsDestino.Rows.Count, "D").End(xlUp).Row
+    Else
+        ultimaFila = 7
+    End If
+    
+    If ultimaFila > 7 Then
+        wsDestino.Range("D8", wsDestino.Cells(ultimaFila, wsDestino.Columns.Count)).ClearContents
+    End If
+    
+    ' --- LIMPIAR DATOS EN BASE_ASIG (desde D8 hacia la derecha) ---
+    If Application.WorksheetFunction.CountA(wsother.Range("D:D")) > 0 Then
+        ultimaFila = wsother.Cells(wsother.Rows.Count, "D").End(xlUp).Row
+    Else
+        ultimaFila = 7
+    End If
+    
+    If ultimaFila > 7 Then
+        wsother.Range("D8", wsother.Cells(ultimaFila, wsother.Columns.Count)).ClearContents
+    End If
+    
+    ' --- SELECCIONAR ARCHIVO ORIGEN ---
+    rutaArchivo = Application.GetOpenFilename( _
+        Title:="Seleccione el archivo origen", _
+        FileFilter:="Archivos de Excel (*.xls*), *.xls*")
+    
+    If rutaArchivo = False Then
+        MsgBox "Operación cancelada."
+        Exit Sub
+    End If
+    
+    ' --- ABRIR ARCHIVO ORIGEN ---
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Set wbOrigen = Workbooks.Open(Filename:=rutaArchivo, ReadOnly:=True)
+    Set wsOrigen = wbOrigen.Sheets(1) ' o Sheets("NombreHoja") si lo prefieres
+    
+    ' --- DETERMINAR RANGO DE ORIGEN (filas y columnas usadas) ---
+    If Application.WorksheetFunction.CountA(wsOrigen.Cells) = 0 Then
+        MsgBox "La hoja origen está vacía.", vbExclamation
+        wbOrigen.Close SaveChanges:=False
+        GoTo Cleanup
+    End If
+    
+    ultimaFilaOrigen = wsOrigen.Cells.Find("*", SearchOrder:=xlByRows, SearchDirection:=xlPrevious).Row
+    ultimaColOrigen = wsOrigen.Cells.Find("*", SearchOrder:=xlByColumns, SearchDirection:=xlPrevious).Column
+    
+    If ultimaFilaOrigen < 2 Then
+        MsgBox "No hay datos (solo encabezado) en la hoja origen.", vbInformation
+        wbOrigen.Close SaveChanges:=False
+        GoTo Cleanup
+    End If
+    
+    ' Definir rango a copiar (desde fila 2 hasta ultimaFilaOrigen, columnas 1..ultimaColOrigen)
+    Set src = wsOrigen.Range(wsOrigen.Cells(2, 1), wsOrigen.Cells(ultimaFilaOrigen, ultimaColOrigen))
+    filasSrc = src.Rows.Count
+    colsSrc = src.Columns.Count
+    
+    ' Verificar que quepa en la hoja destino empezando en D8
+    If wsDestino.Columns.Count < (Range("D8").Column + colsSrc - 1) Then
+        MsgBox "Los datos de origen tienen más columnas de las que caben empezando en D8 en la hoja destino.", vbCritical
+        wbOrigen.Close SaveChanges:=False
+        GoTo Cleanup
+    End If
+    
+    ' --- PEGAR VALORES DIRECTAMENTE EN D8 (sin usar Copy/Paste) ---
+    Set dst = wsDestino.Range("D8").Resize(filasSrc, colsSrc)
+    dst.Value = src.Value
+    
+    MsgBox "Datos importados desde " & wbOrigen.Name, vbInformation
+    
+    ' --- CERRAR ARCHIVO ORIGEN ---
+    wbOrigen.Close SaveChanges:=False
+
+Cleanup:
+    Application.CutCopyMode = False
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    
+    ' --- ELIMINAR FILAS CON "CAJAMAG" EN COLUMNA D (desde D8 hacia abajo) ---
+    Set ws = wsDestino
+    ultimaFila = ws.Cells(ws.Rows.Count, "D").End(xlUp).Row
+    encontrado = False
+    
+    Application.ScreenUpdating = False
+    For i = ultimaFila To 8 Step -1
+        If Trim(UCase(ws.Cells(i, "D").Value)) = "CAJAMAG" Then
+            ws.Rows(i).Delete
+            encontrado = True
+        End If
+    Next i
+    Application.ScreenUpdating = True
+    
+    If encontrado Then
+        MsgBox "Se eliminaron filas con CAJAMAG.", vbInformation
+    Else
+        MsgBox "No se encontró CAJAMAG en la base.", vbExclamation
+    End If
+
+    Exit Sub
+
+ErrHandler:
+    MsgBox "Ocurrió un error: " & Err.Number & " - " & Err.Description, vbCritical
+    Resume Cleanup
+End Sub
+
+Sub CrearLibrosAsignacion_Seguro()
+
+    Dim FechaTexto As String, FechaForm As String
+    Dim RutaDestino As String
+    Dim wbOrigen As Workbook, wb1 As Workbook, wb2 As Workbook
+    Dim Hojas1 As Variant, Hojas2 As Variant
+    Dim nm As Variant
+    Dim faltantes As String
+    Dim f1 As String, f2 As String
+    Dim estados() As Long
+    Dim i As Long
+    
+    On Error GoTo ErrHandler
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    
+    Set wbOrigen = ThisWorkbook
+    
+    ' --- 1) Pedir FECHA y formatearla segura para nombre de archivo
+    FechaTexto = InputBox("Ingrese la fecha (ej: 2025-08-18 o 18/08/2025):", "Fecha")
+    If Len(Trim(FechaTexto)) = 0 Then GoTo Salir
+    
+    If IsDate(FechaTexto) Then
+        FechaForm = Format(CDate(FechaTexto), "yyyy-mm-dd")
+    Else
+        FechaForm = LimpiarNombreArchivo(FechaTexto)
+    End If
+    
+    ' --- 2) Elegir CARPETA destino
+    With Application.FileDialog(msoFileDialogFolderPicker)
+        .Title = "Seleccione la carpeta donde guardar los archivos"
+        If .Show <> -1 Then GoTo Salir
+        RutaDestino = .SelectedItems(1)
+    End With
+    
+    ' --- 3) Definir hojas a copiar
+    Hojas1 = Array("ASIG", "BASE_ASIG", "ASIG TOTAL", "TOTAL", "BASE TOTAL", "ACTIVIDADES COMPLEMENTARIAS")
+    Hojas2 = Array("ASIG", "BASE_ASIG", "ASIG TOTAL", "TOTAL")
+    
+    faltantes = ""
+    
+    ' --- Guardar estado de visibilidad de las hojas y mostrarlas
+    ReDim estados(1 To wbOrigen.Sheets.Count)
+    For i = 1 To wbOrigen.Sheets.Count
+        estados(i) = wbOrigen.Sheets(i).Visible
+        wbOrigen.Sheets(i).Visible = xlSheetVisible
+    Next i
+    
+    ' --- 4) Crear LIBRO 1
+    Set wb1 = Workbooks.Add(xlWBATWorksheet)
+    wb1.Sheets(1).Name = "TEMP"
+    
+    For Each nm In Hojas1
+        If HojaExiste(CStr(nm), wbOrigen) Then
+            wbOrigen.Sheets(CStr(nm)).Copy After:=wb1.Sheets(wb1.Sheets.Count)
+            With wb1.Sheets(wb1.Sheets.Count)
+                On Error Resume Next
+                .Range("A:C").Delete Shift:=xlToLeft
+                .Rows("1:6").Delete Shift:=xlUp
+                On Error GoTo 0
+                ' <<< eliminar botones en columnas A y B
+                EliminarBotones wb1.Sheets(wb1.Sheets.Count)
+            End With
+        Else
+            faltantes = faltantes & vbCrLf & "- " & nm
+        End If
+    Next nm
+    
+    If wb1.Sheets.Count > 1 Then wb1.Sheets("TEMP").Delete
+    f1 = RutaDestino & "\OPERACION FOSFEC " & FechaForm & " SEGUIMIENTO NS Y ASIGNACION CCF.xlsx"
+    GuardarSobreEscribir wb1, f1
+    wb1.Close SaveChanges:=False
+    
+    ' --- 5) Crear LIBRO 2
+    Set wb2 = Workbooks.Add(xlWBATWorksheet)
+    wb2.Sheets(1).Name = "TEMP"
+    
+    For Each nm In Hojas2
+        If HojaExiste(CStr(nm), wbOrigen) Then
+            wbOrigen.Sheets(CStr(nm)).Copy After:=wb2.Sheets(wb2.Sheets.Count)
+            With wb2.Sheets(wb2.Sheets.Count)
+                On Error Resume Next
+                .Range("A:C").Delete Shift:=xlToLeft
+                .Rows("1:6").Delete Shift:=xlUp
+                On Error GoTo 0
+                ' <<< eliminar botones en columnas A y B
+                EliminarBotones wb2.Sheets(wb2.Sheets.Count)
+            End With
+        Else
+            faltantes = faltantes & vbCrLf & "- " & nm
+        End If
+    Next nm
+    
+    If wb2.Sheets.Count > 1 Then wb2.Sheets("TEMP").Delete
+    f2 = RutaDestino & "\ASIGNACION " & FechaForm & ".xlsx"
+    GuardarSobreEscribir wb2, f2
+    wb2.Close SaveChanges:=False
+    
+    ' --- Restaurar estado de las hojas en el libro original
+    For i = 1 To wbOrigen.Sheets.Count
+        wbOrigen.Sheets(i).Visible = estados(i)
+    Next i
+    
+    ' --- Dejar visible solo la hoja "INICIO" (si existe)
+    If HojaExiste("INICIO", wbOrigen) Then
+        For i = 1 To wbOrigen.Sheets.Count
+            If wbOrigen.Sheets(i).Name = "INICIO" Then
+                wbOrigen.Sheets(i).Visible = xlSheetVisible
+                wbOrigen.Sheets(i).Activate
+            Else
+                wbOrigen.Sheets(i).Visible = xlSheetHidden
+            End If
+        Next i
+    End If
+    
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    
+    Dim msg As String
+    msg = "? Listo. Archivos creados:" & vbCrLf & f1 & vbCrLf & f2
+    If Len(faltantes) > 0 Then
+        msg = msg & vbCrLf & vbCrLf & "? Hojas no encontradas (omitidas):" & faltantes
+    End If
+    MsgBox msg, vbInformation
+    Exit Sub
+
+ErrHandler:
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    MsgBox "Error: " & Err.Description, vbExclamation
+    Exit Sub
+
+Salir:
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+End Sub
+
+'------------------ Helpers ------------------
+
+Private Function HojaExiste(nombre As String, wb As Workbook) As Boolean
+    Dim sh As Worksheet
+    On Error Resume Next
+    Set sh = wb.Sheets(nombre)
+    HojaExiste = Not (sh Is Nothing)
+    Set sh = Nothing
+    On Error GoTo 0
+End Function
+
+Private Function LimpiarNombreArchivo(ByVal s As String) As String
+    Dim i As Integer
+    Dim inval As Variant
+    inval = Array("\", "/", ":", "*", "?", """", "<", ">", "|")
+    For i = LBound(inval) To UBound(inval)
+        s = Replace(s, inval(i), "-")
+    Next i
+    LimpiarNombreArchivo = Trim(s)
+End Function
+
+Private Sub GuardarSobreEscribir(ByVal wb As Workbook, ByVal rutaArchivo As String)
+    If Len(Dir(rutaArchivo)) > 0 Then
+        On Error Resume Next
+        Kill rutaArchivo
+        On Error GoTo 0
+    End If
+    wb.SaveAs Filename:=rutaArchivo, FileFormat:=xlOpenXMLWorkbook
+End Sub
+
+' --- NUEVO: Eliminar botones en columnas A y B
+Private Sub EliminarBotones(ws As Worksheet)
+    Dim shp As Shape
+    Dim rngA As Range, rngB As Range
+    
+    Set rngA = ws.Columns("A")
+    Set rngB = ws.Columns("B")
+    
+    On Error Resume Next
+    For Each shp In ws.Shapes
+        If Not Intersect(shp.TopLeftCell, rngA) Is Nothing _
+           Or Not Intersect(shp.TopLeftCell, rngB) Is Nothing Then
+            shp.Delete
+        End If
+    Next shp
+    On Error GoTo 0
+End Sub
+
+ 
+Sub ActualizarConsultasyTablas()
+
+    Dim ws As Worksheet
+    Dim pt As PivotTable
+    
+    ' 1. Refrescar todas las conexiones (Power Query incluidas)
+    ThisWorkbook.RefreshAll
+    
+    ' 2. Refrescar cada tabla dinámica en todas las hojas
+    For Each ws In ThisWorkbook.Worksheets
+        For Each pt In ws.PivotTables
+            pt.PivotCache.Refresh
+        Next pt
+    Next ws
+    
+    MsgBox "Consultas y tablas dinámicas actualizadas.", vbInformation
+
+End Sub
+
+
+*****Codigo de power query modificado ********
+
+let
+    Origen = Excel.CurrentWorkbook(){[Name="BASE_TOTAL"]}[Content],
+    #"Filas filtradas" = Table.SelectRows(Origen, each ([NOMBRE_CAJA] <> null)),
+    #"Tipo cambiado" = Table.TransformColumnTypes(#"Filas filtradas",{{"NOMBRE_CAJA", type text}, {"NOMBRE_USUARIO", type text}, {"FECHA_PRERADICACION", type datetime}, {"FECHA_RADICACION", type date}, {"FECHA_RECEPCION", type datetime}, {"FECHA_CORRECCION", type datetime}, {"FECHA_ACTUALIZACION", type date}, {"ESTADO_SOLICITUD", type text}, {"NUMERO_RADICADO", type text}, {"NUMERO DE IDENTIFICACION", Int64.Type}, {"MEDIO SOLICITUD", type text}})
+in
+    #"Tipo cambiado"
+
+let
+    Origen = Excel.Workbook(File.Contents("C:\Users\henry.estevez\Desktop\ASIGNACION DE SOLICITUDES\ASIGNACION_PASO_1.xlsm"), null, true),
+    #"BASE TOTAL_Sheet" = Origen{[Item="BASE TOTAL",Kind="Sheet"]}[Data],
+    #"Columnas quitadas1" = Table.RemoveColumns(#"BASE TOTAL_Sheet",{"Column1", "Column2", "Column3"}),
+    #"Filas superiores quitadas1" = Table.Skip(#"Columnas quitadas1",5),
+    #"Encabezados promovidos" = Table.PromoteHeaders(#"Filas superiores quitadas1", [PromoteAllScalars=true]),
+    #"Filas filtradas" = Table.SelectRows(#"Encabezados promovidos", each ([NOMBRE_CAJA] <> null))
+in
+    #"Filas filtradas"
+
+let
+    // Cruce con BASE TOTAL
+    Origen = Table.NestedJoin(BASE_TOTAL, {"NUMERO_RADICADO"}, #"BASE TOTAL", {"NUMERO_RADICADO"}, "BASE TOTAL", JoinKind.FullOuter),
+    #"Se expandió BASE TOTAL" = Table.ExpandTableColumn(Origen, "BASE TOTAL", {"NUMERO_RADICADO"}, {"BASE TOTAL.NUMERO_RADICADO"}),
+    #"Columnas con nombre cambiado" = Table.RenameColumns(#"Se expandió BASE TOTAL",{{"BASE TOTAL.NUMERO_RADICADO", "ASIGNADA"}}),
+
+    // Cargar tabla de festivos
+    FestivosRaw = FESTIVOS,
+    Festivos = List.Transform(FestivosRaw[FechaFestiva], each Date.From(_)),
+
+    // Fecha base
+    FechaActual = DateTime.Date(DateTime.LocalNow()),
+
+    // Función para obtener el siguiente día hábil (con paso variable)
+    SiguienteDiaHabil = (fecha as date, pasos as number) as date =>
+        let
+            siguiente = Date.AddDays(fecha, 1),
+            esFinDeSemana = Date.DayOfWeek(siguiente, Day.Monday) >= 5,
+            esFestivo = List.Contains(Festivos, siguiente),
+            nuevoPaso = if esFinDeSemana or esFestivo then pasos else pasos - 1,
+            resultado = if nuevoPaso = 0 then siguiente else @SiguienteDiaHabil(siguiente, nuevoPaso)
+        in
+            resultado,
+
+    // Calcular DÍA DE CORTE
+    #"Día asignado calculado" = Table.AddColumn(#"Columnas con nombre cambiado", "DÍA DE CORTE", each 
+        let
+            cruzado = [ASIGNADA] <> null,
+            pasos = if cruzado then 1 else 2,
+            fechaCorte = SiguienteDiaHabil(FechaActual, pasos)
+        in
+            Text.Upper(Date.ToText(fechaCorte, "dddd", "es-ES"))
+    ),
+
+    // Actualizar ASIGNADA con mismo valor que DÍA DE CORTE
+    #"Asignada actualizada" = Table.TransformColumns(#"Día asignado calculado", {
+        {"ASIGNADA", each 
+            let
+                cruzado = _ <> null,
+                pasos = if cruzado then 1 else 2,
+                fechaCorte = SiguienteDiaHabil(FechaActual, pasos)
+            in
+                Text.Upper(Date.ToText(fechaCorte, "dddd", "es-ES")), type text}
+    }),
+    #"Columnas quitadas" = Table.RemoveColumns(#"Asignada actualizada",{"DÍA DE CORTE"})
+in
+    #"Columnas quitadas"
+let
+    Festivos2025 = {
+        #date(2025, 1, 1),   // Año Nuevo
+        #date(2025, 1, 6),   // Reyes Magos (trasladado al lunes)
+        #date(2025, 3, 24),  // San José (lunes)
+        #date(2025, 4, 17),  // Jueves Santo
+        #date(2025, 4, 18),  // Viernes Santo
+        #date(2025, 5, 1),   // Día del Trabajo
+        #date(2025, 6, 2),   // Ascensión del Señor (lunes)
+        #date(2025, 6, 23),  // Corpus Christi (lunes)
+        #date(2025, 6, 30),  // Sagrado Corazón (lunes)
+        #date(2025, 7, 20),  // Independencia de Colombia
+        #date(2025, 8, 7),   // Batalla de Boyacá
+        #date(2025, 8, 18),  // Asunción de la Virgen (lunes)
+        #date(2025, 10, 13), // Día de la Raza (lunes)
+        #date(2025, 11, 3),  // Todos los Santos (lunes)
+        #date(2025, 11, 17), // Independencia de Cartagena (lunes)
+        #date(2025, 12, 8),  // Inmaculada Concepción
+        #date(2025, 12, 25)  // Navidad
+    },
+    TablaFestivos = Table.FromList(Festivos2025, Splitter.SplitByNothing(), {"FechaFestiva"}),
+    TipoFecha = Table.TransformColumnTypes(TablaFestivos, {{"FechaFestiva", type date}})
+in
+    TipoFecha
+
+let
+    // Cruce con BASE TOTAL
+    Origen = Table.NestedJoin(BASE_TOTAL, {"NUMERO_RADICADO"}, #"BASE TOTAL", {"NUMERO_RADICADO"}, "BASE TOTAL", JoinKind.FullOuter),
+    #"Se expandió BASE TOTAL" = Table.ExpandTableColumn(Origen, "BASE TOTAL", {"NUMERO_RADICADO"}, {"BASE TOTAL.NUMERO_RADICADO"}),
+    #"Columnas con nombre cambiado" = Table.RenameColumns(#"Se expandió BASE TOTAL",{{"BASE TOTAL.NUMERO_RADICADO", "ASIGNADA"}}),
+
+    // ==============================
+    // BLOQUE FESTIVOS Y DÍAS HÁBILES
+    // ==============================
+    FestivosRaw = FESTIVOS,
+    Festivos = List.Transform(FestivosRaw[FechaFestiva], each Date.From(_)),
+
+    FechaActual = DateTime.Date(DateTime.LocalNow()),
+
+    SiguienteDiaHabil = (fecha as date, pasos as number) as date =>
+        let
+            siguiente = Date.AddDays(fecha, 1),
+            esFinDeSemana = Date.DayOfWeek(siguiente, Day.Monday) >= 5,
+            esFestivo = List.Contains(Festivos, siguiente),
+            nuevoPaso = if esFinDeSemana or esFestivo then pasos else pasos - 1,
+            resultado = if nuevoPaso = 0 then siguiente else @SiguienteDiaHabil(siguiente, nuevoPaso)
+        in
+            resultado,
+
+    // Calcular columna DÍA DE CORTE
+    #"Día asignado calculado" = Table.AddColumn(#"Columnas con nombre cambiado", "DÍA DE CORTE", each 
+        let
+            cruzado = [ASIGNADA] <> null,
+            pasos = if cruzado then 1 else 2,
+            fechaCorte = SiguienteDiaHabil(FechaActual, pasos)
+        in
+            Text.Upper(Date.ToText(fechaCorte, "dddd", "es-ES"))
+    ),
+
+    // Reemplazar ASIGNADA con el valor de DÍA DE CORTE
+    #"Asignada actualizada" = Table.TransformColumns(#"Día asignado calculado", {
+        {"ASIGNADA", each 
+            let
+                cruzado = _ <> null,
+                pasos = if cruzado then 1 else 2,
+                fechaCorte = SiguienteDiaHabil(FechaActual, pasos)
+            in
+                Text.Upper(Date.ToText(fechaCorte, "dddd", "es-ES")), type text}
+    }),
+
+    // ==============================
+    // FILTRO DINÁMICO
+    // ==============================
+    DiaCorteEsperado = 
+        let
+            fechaObjetivo = SiguienteDiaHabil(FechaActual, 1)
+        in
+            Text.Upper(Date.ToText(fechaObjetivo, "dddd", "es-ES")),
+
+    #"Filas filtradas_Dinamico" = Table.SelectRows(#"Asignada actualizada", each [DÍA DE CORTE] = DiaCorteEsperado),
+
+    // ==============================
+    // COLUMNAS ADICIONALES
+    // ==============================
+    #"Personalizada agregada" = Table.AddColumn(#"Filas filtradas_Dinamico", "ANS", each null),
+    #"Personalizada agregada1" = Table.AddColumn(#"Personalizada agregada", "Personalizado1", each null),
+    #"Personalizada agregada2" = Table.AddColumn(#"Personalizada agregada1", "Personalizado2", each null),
+    #"Personalizada agregada3" = Table.AddColumn(#"Personalizada agregada2", "Personalizado3", each null),
+
+    #"Columnas con nombre cambiado1" = Table.RenameColumns(#"Personalizada agregada3", {
+        {"Personalizado1", "ESTADO POST"},
+        {"Personalizado2", "GESTION"},
+        {"Personalizado3", "FECHA DE GESTION"}
+    }),
+
+    // Eliminar DÍA DE CORTE (ya no hace falta)
+    #"Columnas quitadas" = Table.RemoveColumns(#"Columnas con nombre cambiado1",{"DÍA DE CORTE"})
+in
+    #"Columnas quitadas"
+
+
