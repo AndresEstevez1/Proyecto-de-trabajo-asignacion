@@ -1,0 +1,782 @@
+ Sub Buscar_Documentacion()
+
+    Call DesocultarTodasLasHojas
+    Call ImportaryDepurarYProcesarBDUA
+    Call NombrarTablasYOcultarHojas
+    Call Ocultar_Todas_Menos_Inicio
+      
+    
+    MsgBox "Busqueda exitosa, por favor actualizar consultas", vbInformation
+
+End Sub
+
+Sub Verificacion()
+
+    Call FiltrarYContar_Consulta_BDUA
+    Call ContarFilas_Formula
+    Call Restar_Valores_K28_K29
+
+End Sub
+
+Sub FiltrarYContar_Consulta_BDUA()
+    Dim ws As Worksheet
+    Dim hojaOculta As Boolean
+    Dim tbl As ListObject
+    Dim rngVis As Range
+    Dim area As Range
+    Dim filasVisibles As Long
+
+    ' Asignar la hoja
+    Set ws = ThisWorkbook.Sheets("CONSULTA_BDUA")
+    
+    ' Si está oculta, mostrar temporalmente
+    hojaOculta = (ws.Visible <> xlSheetVisible)
+    If hojaOculta Then ws.Visible = xlSheetVisible
+
+    ' Verificar la tabla
+    On Error Resume Next
+    Set tbl = ws.ListObjects("CONSULTA_BDUA")
+    On Error GoTo 0
+
+    If tbl Is Nothing Then
+        MsgBox "No se encontró la tabla 'CONSULTA_BDUA'.", vbExclamation
+        If hojaOculta Then ws.Visible = xlSheetHidden
+        Exit Sub
+    End If
+
+    ' Si la tabla no tiene autofiltro, lo activa
+    If Not tbl.Range.Parent.AutoFilterMode Then
+        tbl.Range.AutoFilter
+    End If
+
+    ' Limpiar solo los campos usados (si los tuviera)
+    On Error Resume Next
+    tbl.Range.AutoFilter Field:=1
+    tbl.Range.AutoFilter Field:=5
+    On Error GoTo 0
+
+    ' Aplicar filtro campo 1 (CCF)
+    tbl.Range.AutoFilter Field:=1, _
+        Criteria1:=Array("CAFABA", "CAFAM", "CAFASUR", "CAJACOPI ATLANTICO", "CAJASAI", _
+        "CAJASAN", "COFREM", "COMBARRANQUILLA", "COMCAJA", "COMFABOY", "COMFACA", _
+        "COMFACASANARE", "COMFACAUCA", "COMFACESAR", "COMFACHOCO", "COMFACOR", "COMFACUNDI", _
+        "COMFAGUAJIRA", "COMFAMILIAR CARTAGENA", "COMFAMILIAR HUILA", "COMFAMILIAR NARIÑO", _
+        "COMFAMILIAR PUTUMAYO", "COMFAMILIAR RISARALDA", "COMFANORTE", "COMFAORIENTE", _
+        "COMFASUCRE", "COMFATOLIMA", "COMFENALCO ANTIOQUIA", "COMFENALCO CARTAGENA", _
+        "COMFENALCO QUINDIO", "COMFENALCO TOLIMA", "COMFENALCO VALLE", "COMPENSAR", _
+        "CONFAMILIARES"), Operator:=xlFilterValues
+
+    ' Aplicar filtro campo 5 (Estado)
+    tbl.Range.AutoFilter Field:=5, _
+        Criteria1:="=ACTIVA", Operator:=xlOr, Criteria2:="=EN ESPERA"
+
+    ' Contar filas visibles (sin encabezado)
+    filasVisibles = 0
+    On Error Resume Next
+    Set rngVis = tbl.DataBodyRange.SpecialCells(xlCellTypeVisible)
+    On Error GoTo 0
+
+    If Not rngVis Is Nothing Then
+        For Each area In rngVis.Areas
+            filasVisibles = filasVisibles + area.Rows.Count
+        Next area
+    End If
+
+    ' Guardar el resultado en INICIO!K29
+    ThisWorkbook.Sheets("INICIO").Range("K29").Value = filasVisibles
+
+    ' Mostrar mensaje informativo
+    MsgBox "Filas visibles después del filtro: " & filasVisibles, vbInformation, "CONSULTA_BDUA"
+
+    ' ? Quitar todos los filtros (dejar tabla limpia)
+    On Error Resume Next
+    tbl.AutoFilter.ShowAllData
+    On Error GoTo 0
+
+    ' Restaurar visibilidad original
+    If hojaOculta Then ws.Visible = xlSheetHidden
+End Sub
+
+
+
+
+Sub ContarFilas_Formula()
+    Dim ws As Worksheet
+    Dim hojaOculta As Boolean
+    Dim ultimaFila As Long
+
+    Set ws = ThisWorkbook.Sheets("Reporte_Empleados_Bdua_Ruaf")
+
+    hojaOculta = (ws.Visible <> xlSheetVisible)
+    If hojaOculta Then ws.Visible = xlSheetVisible
+
+    ultimaFila = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row - 1 'Descuenta encabezado
+    ThisWorkbook.Sheets("INICIO").Range("K28").Value = ultimaFila
+
+    If hojaOculta Then ws.Visible = xlSheetHidden
+
+    MsgBox "Filas totales en Reporte_Empleados_Bdua_Ruaf: " & ultimaFila, vbInformation
+End Sub
+
+Sub Restar_Valores_K28_K29()
+    Dim ws As Worksheet
+    Dim valor1 As Double
+    Dim valor2 As Double
+    Dim resultado As Double
+
+    ' Asignar la hoja
+    Set ws = ThisWorkbook.Sheets("INICIO")
+
+    ' Tomar los valores
+    valor1 = ws.Range("K28").Value
+    valor2 = ws.Range("K29").Value
+
+    ' Calcular la resta
+    resultado = valor1 - valor2
+
+    ' Guardar el resultado en K30
+    ws.Range("K30").Value = resultado
+
+    ' Mostrar mensaje
+    MsgBox "Diferencia de informacion= " & resultado, vbInformation, "Cálculo realizado"
+End Sub
+
+
+
+'Botones fijos
+Sub Botones_fijos()
+
+    Dim ws As Worksheet
+    Dim shp As Shape
+
+    For Each ws In ThisWorkbook.Worksheets
+        For Each shp In ws.Shapes
+            shp.Placement = xlFreeFloating ' No mover ni cambiar tamaño con celdas
+        Next shp
+    Next ws
+
+    MsgBox "Todos los botones han sido fijados y ya no se moverán con filtros u ordenamientos.", vbInformation
+
+End Sub
+
+Sub DesocultarTodasLasHojas()
+
+    Dim ws As Worksheet
+    For Each ws In ThisWorkbook.Worksheets
+        ws.Visible = xlSheetVisible
+    Next ws
+    MsgBox "Todas las hojas han sido desocultadas.", vbInformation
+    
+End Sub
+
+Sub Ocultar_Todas_Menos_Inicio()
+    Dim ws As Worksheet
+    Application.ScreenUpdating = False
+    
+    For Each ws In ThisWorkbook.Worksheets
+        ws.Visible = (ws.Name = "INICIO")
+    Next ws
+    
+    Application.ScreenUpdating = True
+End Sub
+
+
+'Botones de las hojas
+
+Sub INICIO()
+
+    Application.ScreenUpdating = False
+    Worksheets("INICIO").Visible = True
+    Worksheets("GENERO INDETERMINADO").Visible = False
+    Worksheets("APORTAN A PENSION").Visible = False
+    Worksheets("CRUCE BDUA").Visible = False
+    Worksheets("SIN AFILIACION BDUA").Visible = False
+
+End Sub
+
+Sub GENERO_INDETERMINADO()
+
+    Application.ScreenUpdating = False
+    Worksheets("GENERO INDETERMINADO").Visible = True
+    Worksheets("INICIO").Visible = False
+    Worksheets("APORTAN A PENSION").Visible = False
+    Worksheets("CRUCE BDUA").Visible = False
+    Worksheets("SIN AFILIACION BDUA").Visible = False
+
+End Sub
+
+Sub APORTAN_A_PENSION()
+
+    Application.ScreenUpdating = False
+    Worksheets("APORTAN A PENSION").Visible = True
+    Worksheets("GENERO INDETERMINADO").Visible = False
+    Worksheets("INICIO").Visible = False
+    Worksheets("CRUCE BDUA").Visible = False
+    Worksheets("SIN AFILIACION BDUA").Visible = False
+
+End Sub
+
+Sub CRUCE_BDUA()
+ 
+    'Botones para ocultar hojas
+    Application.ScreenUpdating = False
+    Worksheets("CRUCE BDUA").Visible = True
+    Worksheets("APORTAN A PENSION").Visible = False
+    Worksheets("GENERO INDETERMINADO").Visible = False
+    Worksheets("INICIO").Visible = False
+    Worksheets("SIN AFILIACION BDUA").Visible = False
+
+End Sub
+
+Sub SIN_AFILIACION_BDUA()
+    
+    Application.ScreenUpdating = False
+    Worksheets("SIN AFILIACION BDUA").Visible = True
+    Worksheets("CRUCE BDUA").Visible = False
+    Worksheets("APORTAN A PENSION").Visible = False
+    Worksheets("GENERO INDETERMINADO").Visible = False
+    Worksheets("INICIO").Visible = False
+    
+End Sub
+
+Sub ImportaryDepurarYProcesarBDUA()
+    ' Definir las variables para los archivos y las hojas
+    Dim wbPrincipal As Workbook
+    Dim wbExterno As Workbook
+    Dim RutaBase As String
+    Dim nombreArchivo1 As String, nombreArchivo2 As String
+    Dim nombreHoja1 As String, nombreHoja2 As String
+    Dim ruta1 As String, ruta2 As String
+    Dim ws1 As Worksheet, ws2 As Worksheet
+    Dim fDialog As FileDialog
+
+    ' Establecer el archivo principal
+    Set wbPrincipal = ThisWorkbook
+
+    ' Abrir el explorador de carpetas para seleccionar la ruta base
+    Set fDialog = Application.FileDialog(msoFileDialogFolderPicker)
+    With fDialog
+        .Title = "Seleccione la carpeta donde están los archivos CONSULTA_BDUA.xlsx y PILA.xlsx"
+        .AllowMultiSelect = False
+        If .Show = -1 Then
+            RutaBase = .SelectedItems(1)
+        Else
+            MsgBox "No seleccionó ninguna carpeta. El proceso se cancelará.", vbExclamation
+            Exit Sub
+        End If
+    End With
+
+    ' Definir los nombres de los archivos y las hojas a importar
+    nombreArchivo1 = "CONSULTA_BDUA.xlsx"
+    nombreHoja1 = "CONSULTA_BDUA"
+    nombreArchivo2 = "PILA.xlsx"
+    nombreHoja2 = "PILA"
+
+    ' Construir las rutas completas para los archivos
+    ruta1 = RutaBase & "\" & nombreArchivo1
+    ruta2 = RutaBase & "\" & nombreArchivo2
+
+    ' Desactivar actualizaciones en pantalla, cálculos y eventos para mejorar la velocidad
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+
+    ' Importar la primera hoja
+    If Dir(ruta1) <> "" Then
+        Set wbExterno = Workbooks.Open(ruta1)
+        Set ws1 = wbExterno.Sheets(nombreHoja1)
+        ws1.Copy After:=wbPrincipal.Sheets(wbPrincipal.Sheets.Count)
+        wbExterno.Close SaveChanges:=False
+        wbPrincipal.Sheets(wbPrincipal.Sheets.Count).Name = "CONSULTA_BDUA"
+    Else
+        MsgBox "Archivo no encontrado: " & ruta1
+    End If
+
+    ' Importar la segunda hoja
+    If Dir(ruta2) <> "" Then
+        Set wbExterno = Workbooks.Open(ruta2)
+        Set ws2 = wbExterno.Sheets(nombreHoja2)
+        ws2.Copy After:=wbPrincipal.Sheets(wbPrincipal.Sheets.Count)
+        wbExterno.Close SaveChanges:=False
+        wbPrincipal.Sheets(wbPrincipal.Sheets.Count).Name = "Reporte_Empleados_Bdua_Ruaf"
+    Else
+        MsgBox "Archivo no encontrado: " & ruta2
+    End If
+
+    ' Reactivar actualizaciones en pantalla, cálculos y eventos
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+
+    MsgBox "Las hojas se importaron correctamente."
+End Sub
+
+Sub FiltroMasivoPorHojas()
+    Dim Lista As Collection
+    Dim item As Variant
+    Dim wsHojaBase As Worksheet
+    Dim uFila As Long
+    Dim rangoDatos As Range
+    Dim uFilaFiltro As Long
+    Dim wbLibroNuevo As Workbook
+    Dim RutaBase As String
+    Dim RutaCarpeta As String
+    Dim NombreArchivo As String
+    Dim AñoEjecucion As String, MesEjecucion As String, DiaEjecucion As Integer, ParteMes As String
+    Dim HojasFiltro As Variant
+    Dim hojaNombre As Variant
+    Dim hayDatosVisibles As Boolean
+    
+    Application.ScreenUpdating = False
+    
+         ' --- Seleccionar carpeta destino con cuadro de diálogo ---
+    Dim fDialog As FileDialog
+    Set fDialog = Application.FileDialog(msoFileDialogFolderPicker)
+    
+    With fDialog
+        .Title = "Seleccione la carpeta donde se guardarán los archivos generados"
+        .AllowMultiSelect = False
+        If .Show = -1 Then
+            RutaBase = .SelectedItems(1)
+            If Right(RutaBase, 1) <> "\" Then RutaBase = RutaBase & "\"
+        Else
+            MsgBox "No seleccionó ninguna carpeta. El proceso se cancelará.", vbExclamation
+            Exit Sub
+        End If
+    End With
+        
+    ' Fecha ejecución y formato de carpeta
+    AñoEjecucion = Format(Date, "yyyy")
+    MesEjecucion = Format(Date, "mm")
+    DiaEjecucion = Day(Date)
+    
+    If DiaEjecucion >= 1 And DiaEjecucion <= 17 Then
+        ParteMes = "01"
+    Else
+        ParteMes = "02"
+    End If
+    
+    ' Lista de hojas a procesar
+    HojasFiltro = Array("GENERO INDETERMINADO", "APORTAN A PENSION", "CRUCE BDUA", "SIN AFILIACION BDUA")
+    
+    For Each hojaNombre In HojasFiltro
+        On Error Resume Next
+        Set wsHojaBase = ThisWorkbook.Worksheets(hojaNombre)
+        On Error GoTo 0
+        
+        If Not wsHojaBase Is Nothing Then
+            ' Última fila en base a columna D
+            uFila = wsHojaBase.Range("D" & wsHojaBase.Rows.Count).End(xlUp).Row
+            uColumna = wsHojaBase.Cells(7, wsHojaBase.Columns.Count).End(xlToLeft).Column
+            ' Definir rango de datos real
+            Set rangoDatos = wsHojaBase.Range(wsHojaBase.Cells(7, "D"), wsHojaBase.Cells(uFila, uColumna))
+            
+            ' Crear lista de valores únicos en columna E (columna 5)
+            Set Lista = DatosUnicos(wsHojaBase.Range("E7:E" & uFila))
+            
+            ' Crear carpeta para esta hoja
+            RutaCarpeta = RutaBase & AñoEjecucion & MesEjecucion & "-" & ParteMes & " " & hojaNombre & "\"
+            If Dir(RutaCarpeta, vbDirectory) = "" Then MkDir RutaCarpeta
+            
+            For Each item In Lista
+              
+                ' Aplicar filtro en la columna 2 del rango (columna E del Excel)
+                rangoDatos.AutoFilter Field:=2, Criteria1:=item
+                
+                ' Última fila visible luego del filtro
+                uFilaFiltro = wsHojaBase.Range("D" & wsHojaBase.Rows.Count).End(xlUp).Row
+                
+                ' Verificar si hay datos visibles (sin error)
+                hayDatosVisibles = False
+                On Error Resume Next
+                hayDatosVisibles = (rangoDatos.Columns(1).SpecialCells(xlCellTypeVisible).Count > 1)
+                On Error GoTo 0
+                
+                If hayDatosVisibles Then
+                    ' Copiar solo las filas visibles filtradas
+                    wsHojaBase.Range("D7:L" & uFilaFiltro).SpecialCells(xlCellTypeVisible).Copy
+                    
+                    ' Crear nuevo libro y pegar
+                    Set wbLibroNuevo = Workbooks.Add
+                    wbLibroNuevo.Worksheets(1).Range("A1").PasteSpecial Paste:=xlPasteAll
+                    wbLibroNuevo.Worksheets(1).Name = "DATOS"
+                    
+                    ' Nombre archivo con el formato pedido
+                    NombreArchivo = AñoEjecucion & MesEjecucion & "-" & ParteMes & " " & hojaNombre & " - " & item & ".xlsx"
+                    
+                    wbLibroNuevo.Close SaveChanges:=True, Filename:=RutaCarpeta & NombreArchivo
+                End If
+            Next item
+            
+            ' Quitar autofiltro
+            On Error Resume Next
+            rangoDatos.AutoFilter
+            On Error GoTo 0
+        Else
+            MsgBox "La hoja '" & hojaNombre & "' no existe en este libro.", vbExclamation
+        End If
+        
+        Set wsHojaBase = Nothing
+    Next hojaNombre
+    
+    MsgBox "Archivos generados con éxito.", vbInformation
+    Application.ScreenUpdating = True
+End Sub
+
+
+'---------------------------------------------------
+' Función para devolver valores únicos en un rango
+'---------------------------------------------------
+Function DatosUnicos(Rango As Range) As Collection
+    Dim celda As Range
+    Set DatosUnicos = New Collection
+    
+    On Error Resume Next
+    For Each celda In Rango.Cells
+        If Len(Trim(celda.Value)) > 0 Then ' Ignorar vacíos
+            DatosUnicos.Add celda.Value, CStr(celda.Value)
+        End If
+    Next celda
+    On Error GoTo 0
+End Function
+
+Sub ActualizarTodasLasConexiones()
+    ThisWorkbook.RefreshAll
+    MsgBox "Todas las consultas y conexiones se han actualizado.", vbInformation
+End Sub
+
+
+Sub EliminarBDUApasado()
+
+    Dim ws As Worksheet
+    Dim nombre1 As String, nombre2 As String
+    Dim eliminadas As Boolean
+    
+    nombre1 = "CONSULTA_BDUA"
+    nombre2 = "Reporte_Empleados_Bdua_Ruaf"
+    
+    eliminadas = False
+    
+    Application.DisplayAlerts = False ' evita confirmaciones
+    
+    '--- Intentar eliminar la primera hoja
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(nombre1)
+    If Not ws Is Nothing Then
+        ws.Delete
+        eliminadas = True
+    End If
+    
+    '--- Intentar eliminar la segunda hoja
+    Set ws = ThisWorkbook.Sheets(nombre2)
+    If Not ws Is Nothing Then
+        ws.Delete
+        eliminadas = True
+    End If
+    On Error GoTo 0
+    
+    Application.DisplayAlerts = True
+    
+    '--- Mensaje final
+    If eliminadas Then
+        MsgBox "Las hojas fueron eliminadas correctamente.", vbInformation
+    Else
+        MsgBox "No hay información para depurar.", vbExclamation
+    End If
+
+End Sub
+
+
+Sub NombrarTablasYOcultarHojas()
+    Dim ws1 As Worksheet, ws2 As Worksheet
+    Dim tbl As ListObject
+    
+    ' Verificar si existen las hojas
+    On Error Resume Next
+    Set ws1 = ThisWorkbook.Sheets("CONSULTA_BDUA")
+    Set ws2 = ThisWorkbook.Sheets("Reporte_Empleados_Bdua_Ruaf")
+    On Error GoTo 0
+    
+    If ws1 Is Nothing Or ws2 Is Nothing Then
+        MsgBox "Una o ambas hojas no existen. Verifique que estén en el libro.", vbCritical
+        Exit Sub
+    End If
+    
+    ' --- Hoja CONSULTA_BDUA ---
+    If ws1.ListObjects.Count > 0 Then
+        ' Si ya existe una tabla en la hoja
+        On Error Resume Next
+        ws1.ListObjects(1).Name = "CONSULTA_BDUA"
+        On Error GoTo 0
+    Else
+        ' Si no tiene tabla, la creamos a partir del rango usado
+        Set tbl = ws1.ListObjects.Add(xlSrcRange, ws1.UsedRange, , xlYes)
+        tbl.Name = "CONSULTA_BDUA"
+    End If
+    
+    ' --- Hoja Reporte_Empleados_Bdua_Ruaf ---
+    If ws2.ListObjects.Count > 0 Then
+        On Error Resume Next
+        ws2.ListObjects(1).Name = "Reporte_Empleados_Bdua_Ruaf"
+        On Error GoTo 0
+    Else
+        Set tbl = ws2.ListObjects.Add(xlSrcRange, ws2.UsedRange, , xlYes)
+        tbl.Name = "Reporte_Empleados_Bdua_Ruaf"
+    End If
+    
+    ' --- Ocultar las hojas ---
+    ws1.Visible = xlSheetHidden
+    ws2.Visible = xlSheetHidden
+    
+    MsgBox "Tablas nombradas y hojas ocultadas correctamente.", vbInformation
+End Sub
+
+** Power query***
+
+let
+    // Cargar la lista de nombres femeninos
+    FuenteNombres = Excel.CurrentWorkbook(){[Name="Tabla8"]}[Content],
+    Hoja1_Sheet = FuenteNombres{[Item="Hoja1",Kind="Sheet"]}[Data],
+    TipoCambiadoNombres = Table.TransformColumnTypes(Hoja1_Sheet,{{"Column1", type text}}),
+    NombresRenombrado = Table.RenameColumns(TipoCambiadoNombres,{{"NOMBRES FEMENINOS", "NOMBRES"}}),
+    EncabezadosPromovidos = Table.PromoteHeaders(NombresRenombrado, [PromoteAllScalars=true]),
+    TipoCambiadoFinal = Table.TransformColumnTypes(EncabezadosPromovidos,{{"NOMBRES FEMENINOS", type text}}),
+    ListaNombresFemeninos = TipoCambiadoFinal[NOMBRES],
+
+    // Cargar y procesar CONSULTA_BDUA
+    Origen = Excel.CurrentWorkbook(){[Name="CONSULTA_BDUA"]}[Content],
+    #"Tipo cambiado" = Table.TransformColumnTypes(
+        Origen,
+        {
+            {"CCF", type text},
+            {"NUMERO_RADICADO", type text},
+            {"TIPO_ID", type text},
+            {"NUMERO_DE_ID", Int64.Type},
+            {"DESCRIPCION", type text},
+            {"NOMBRE_BENEFICIARIO", type text},
+            {"CODIGO_EPS", type text},
+            {"FECHA_NACIMIENTO", type datetime},
+            {"GENERO", type text},
+            {"IDENTIFICACION_EMPLEADOR", Int64.Type},
+            {"FECHA_CESACION", type datetime},
+            {"DIGITO_VERIFICACION_EMPLEADOR", Int64.Type}
+        }
+    ),
+    #"Columnas reordenadas" = Table.ReorderColumns(
+        #"Tipo cambiado",
+        {
+            "DESCRIPCION", "CCF", "NUMERO_RADICADO", "TIPO_ID", "NUMERO_DE_ID",
+            "NOMBRE_BENEFICIARIO", "CODIGO_EPS", "FECHA_NACIMIENTO", "GENERO",
+            "IDENTIFICACION_EMPLEADOR", "FECHA_CESACION", "DIGITO_VERIFICACION_EMPLEADOR"
+        }
+    ),
+    #"Columnas con nombre cambiado" = Table.RenameColumns(#"Columnas reordenadas",{{"DESCRIPCION", "ESTADO"}}),
+    #"Filas filtradas" = Table.SelectRows(#"Columnas con nombre cambiado", each ([ESTADO] = "ACTIVA" or [ESTADO] = "EN ESPERA")),
+    #"Columnas quitadas" = Table.RemoveColumns(#"Filas filtradas",{"NUMERO_RADICADO"}),
+    #"Columnas con nombre cambiado1" = Table.RenameColumns(#"Columnas quitadas",{{"CODIGO_EPS", "EPS_POST"}}),
+    #"Columnas quitadas1" = Table.RemoveColumns(#"Columnas con nombre cambiado1",{"IDENTIFICACION_EMPLEADOR", "FECHA_CESACION", "DIGITO_VERIFICACION_EMPLEADOR"}),
+
+    // Unión con Reporte_Empleados_Bdua_Ruaf
+    #"Consultas combinadas" = Table.NestedJoin(#"Columnas quitadas1", {"NUMERO_DE_ID"}, #"Reporte_Empleados_Bdua_Ruaf", {"cedulas"}, "Reporte_Empleados_Bdua_Ruaf", JoinKind.FullOuter),
+    #"Se expandió Reporte_Empleados_Bdua_Ruaf" = Table.ExpandTableColumn(#"Consultas combinadas", "Reporte_Empleados_Bdua_Ruaf", {"cedulas", "EPS_BDUA", "Fecha afiliación", "Coincidencia", "VALIDACION"}, {"Reporte_Empleados_Bdua_Ruaf.cedulas", "Reporte_Empleados_Bdua_Ruaf.EPS_BDUA", "Reporte_Empleados_Bdua_Ruaf.Fecha afiliación", "Reporte_Empleados_Bdua_Ruaf.Coincidencia", "Reporte_Empleados_Bdua_Ruaf.VALIDACION"}),
+    #"Columnas quitadas2" = Table.RemoveColumns(#"Se expandió Reporte_Empleados_Bdua_Ruaf",{"Reporte_Empleados_Bdua_Ruaf.cedulas"}),
+    #"Columnas reordenadas1" = Table.ReorderColumns(#"Columnas quitadas2",{"ESTADO", "CCF", "TIPO_ID", "NUMERO_DE_ID", "NOMBRE_BENEFICIARIO", "EPS_POST", "Reporte_Empleados_Bdua_Ruaf.EPS_BDUA", "Reporte_Empleados_Bdua_Ruaf.Fecha afiliación", "Reporte_Empleados_Bdua_Ruaf.Coincidencia", "Reporte_Empleados_Bdua_Ruaf.VALIDACION", "FECHA_NACIMIENTO", "GENERO"}),
+    #"Columnas con nombre cambiado2" = Table.RenameColumns(#"Columnas reordenadas1",{{"Reporte_Empleados_Bdua_Ruaf.VALIDACION", "(NO) APORTA A PENSION"}, {"Reporte_Empleados_Bdua_Ruaf.EPS_BDUA", "EPS_BDUA"}, {"Reporte_Empleados_Bdua_Ruaf.Fecha afiliación", "FECHA AFILIACION"}, {"Reporte_Empleados_Bdua_Ruaf.Coincidencia", "CONCIDENCIA"}}),
+    #"Columna condicional agregada" = Table.AddColumn(#"Columnas con nombre cambiado2", "CRUCE", each if [EPS_POST] = [EPS_BDUA] then "VERDADERO" else "FALSO"),
+    #"Columnas reordenadas2" = Table.ReorderColumns(#"Columna condicional agregada",{"ESTADO", "CCF", "TIPO_ID", "NUMERO_DE_ID", "NOMBRE_BENEFICIARIO", "EPS_POST", "EPS_BDUA", "FECHA AFILIACION", "CONCIDENCIA", "CRUCE", "(NO) APORTA A PENSION", "FECHA_NACIMIENTO", "GENERO"}),
+    #"Columna condicional agregada1" = Table.AddColumn(#"Columnas reordenadas2", "EPS_BDUA1", each if [EPS_BDUA] = "" then "SIN AFILIACION BDUA" else [EPS_BDUA]),
+    #"Columnas reordenadas3" = Table.ReorderColumns(#"Columna condicional agregada1",{"ESTADO", "CCF", "TIPO_ID", "NUMERO_DE_ID", "NOMBRE_BENEFICIARIO", "EPS_POST", "EPS_BDUA", "EPS_BDUA1", "FECHA AFILIACION", "CONCIDENCIA", "CRUCE", "(NO) APORTA A PENSION", "FECHA_NACIMIENTO", "GENERO"}),
+    #"Columna condicional agregada2" = Table.AddColumn(#"Columnas reordenadas3", "FECHA AFILIACION1", each if [EPS_BDUA] = "" then "SIN AFILIACION BDUA" else [FECHA AFILIACION]),
+    #"Columna condicional agregada3" = Table.AddColumn(#"Columna condicional agregada2", "COINCIDENCIA1", each if [EPS_BDUA] = "" then "SIN AFILIACION BDUA" else [CONCIDENCIA]),
+    #"Columna condicional agregada4" = Table.AddColumn(#"Columna condicional agregada3", "CRUCE1", each if [EPS_BDUA] = "" then "SIN AFILIACION BDUA" else [CRUCE]),
+    #"Columnas quitadas3" = Table.RemoveColumns(#"Columna condicional agregada4",{"FECHA AFILIACION", "CONCIDENCIA", "CRUCE", "EPS_BDUA"}),
+    #"Columnas con nombre cambiado3" = Table.RenameColumns(#"Columnas quitadas3",{{"EPS_BDUA1", "EPS_BDUA"}, {"FECHA AFILIACION1", "FECHA AFILIACION"}, {"COINCIDENCIA1", "COINCIDENCIA"}, {"CRUCE1", "CRUCE"}}),
+    #"Valor reemplazado" = Table.ReplaceValue(#"Columnas con nombre cambiado3","VERDADERO","EPS COINCIDE",Replacer.ReplaceText,{"CRUCE"}),
+    #"Valor reemplazado1" = Table.ReplaceValue(#"Valor reemplazado","FALSO","CRUCE BDUA",Replacer.ReplaceText,{"CRUCE"}),
+
+    // Cálculo de edad
+    #"Personalizada agregada" = Table.AddColumn(#"Valor reemplazado1", "EDAD", each 
+        let
+            hoy = DateTime.Date(DateTime.LocalNow()),
+            edad = Date.Year(hoy) - Date.Year([FECHA_NACIMIENTO]),
+            cumpleEsteAño = Date.From(Date.AddYears([FECHA_NACIMIENTO], edad)) > hoy,
+            edadFinal = if cumpleEsteAño then edad - 1 else edad
+        in edadFinal
+    ),
+
+    // Cálculo de cumplimiento por edad
+    #"Personalizada agregada1" = Table.AddColumn(#"Personalizada agregada", "CUMPLE", each if ([GENERO] = "F" and [EDAD] >= 57) or ([GENERO] = "M" and [EDAD] >= 62) then "EDAD CUMPLIDA" else "EDAD NO CUMPLIDA"),
+
+    // Ajuste de género con lista de nombres
+    #"Columnas reordenadas7" = Table.ReorderColumns(#"Personalizada agregada1",{"ESTADO", "CCF", "TIPO_ID", "NUMERO_DE_ID", "NOMBRE_BENEFICIARIO", "EPS_POST", "EPS_BDUA", "FECHA AFILIACION", "COINCIDENCIA", "CRUCE", "(NO) APORTA A PENSION", "FECHA_NACIMIENTO", "GENERO", "CUMPLE", "EDAD"}),
+    #"Personalizada agregada2" = Table.AddColumn(#"Columnas reordenadas7", "GENERO_AJUSTADO", each 
+        let
+            texto = Text.Upper([NOMBRE_BENEFICIARIO]),
+            coincidencias = List.Select(NOMBRES_M, each Text.Contains(texto, Text.Upper(_)))
+        in
+            if [GENERO] = "I" and List.Count(coincidencias) > 0 then "F" else [GENERO]
+    )
+in
+    #"Personalizada agregada2"
+
+let
+    // Origen de los datos
+    Origen = Excel.CurrentWorkbook(){[Name="Reporte_Empleados_Bdua_Ruaf"]}[Content],
+    #"Columnas con nombre cambiado" = Table.RenameColumns(Origen,{{"Aporta a pension", "PAGA PENSION"}, {"no aporta a pension por edad", "NO PAGA PENSION POR EDAD"}, {"no aporta a pension", "NO PAGA PENSION"}}),
+
+    // Cambiar tipo inicial
+    #"Tipo cambiado" = Table.TransformColumnTypes(#"Columnas con nombre cambiado", {
+        {"Identificación", type text}, {"Primer nombre", type text}, {"Segundo nombre", type text},
+        {"Primer apellido", type text}, {"Segundo apellido", type text}, {"EPS", type text},
+        {"Fecha afiliación", type date}, {"Coincidencia", Int64.Type}, {"Valor UPC", Int64.Type},
+        {"AFP", type text}, {"Subtipos de cotizante válidos", type text}, {"PAGA PENSION", type text},
+        {"NO PAGA PENSION POR EDAD", type any}, {"NO PAGA PENSION", type text}
+    }),
+
+    // Agregar columna "cedulas" extrayendo desde la posición 2
+    #"Personalizada agregada" = Table.AddColumn(#"Tipo cambiado", "cedulas", each Text.Middle([Identificación], 2)),
+
+    // Reordenar columnas para dejar cedulas al inicio
+    #"Columnas reordenadas" = Table.ReorderColumns(#"Personalizada agregada", {
+        "cedulas", "Identificación", "Primer nombre", "Segundo nombre", "Primer apellido", "Segundo apellido",
+        "EPS", "Fecha afiliación", "Coincidencia", "Valor UPC", "AFP", "Subtipos de cotizante válidos",
+        "PAGA PENSION", "NO PAGA PENSION POR EDAD", "NO PAGA PENSION"
+    }),
+
+    // Quitar la columna Identificación original
+    #"Columnas quitadas" = Table.RemoveColumns(#"Columnas reordenadas", {"Identificación"}),
+
+    // Crear nueva columna EPS_BDUA extrayendo texto antes del "-"
+    #"Personalizada agregada1" = Table.AddColumn(#"Columnas quitadas", "EPS_BDUA", each Text.BeforeDelimiter([EPS], "-")),
+
+    // Reordenar columnas para dejar EPS_BDUA cerca
+    #"Columnas reordenadas1" = Table.ReorderColumns(#"Personalizada agregada1", {
+        "cedulas", "Primer nombre", "Segundo nombre", "Primer apellido", "Segundo apellido",
+        "EPS", "EPS_BDUA", "Fecha afiliación", "Coincidencia", "Valor UPC", "AFP",
+        "Subtipos de cotizante válidos", "PAGA PENSION", "NO PAGA PENSION POR EDAD", "NO PAGA PENSION"
+    }),
+
+    // Eliminar EPS original
+    #"Columnas quitadas1" = Table.RemoveColumns(#"Columnas reordenadas1", {"EPS"}),
+
+    // Agregar columna de validación pensional
+    #"Personalizada agregada2" = Table.AddColumn(#"Columnas quitadas1", "VALIDACION", each
+        if [PAGA PENSION] = "X" then "SI APORTAN A PENSION"
+        else if [NO PAGA PENSION POR EDAD] = "X" then "NO OBLIGADO A COTIZAR POR EDAD"
+        else if [NO PAGA PENSION] = "X" then "NO APORTAN A PENSION"
+        else "SIN MARCACION"
+    ),
+
+    // Eliminar columnas no necesarias
+    #"Columnas quitadas2" = Table.RemoveColumns(#"Personalizada agregada2", {
+        "Primer nombre", "Segundo nombre", "Primer apellido", "Segundo apellido",
+        "Valor UPC", "AFP", "Subtipos de cotizante válidos"
+    }),
+
+    // Asegurar tipo de cedulas
+    #"Tipo cambiado2" = Table.TransformColumnTypes(#"Columnas quitadas2", {{"cedulas", Int64.Type}}),
+
+    // Eliminar marcadores de pensión ya usados
+    #"Columnas quitadas3" = Table.RemoveColumns(#"Tipo cambiado2", {
+        "PAGA PENSION", "NO PAGA PENSION POR EDAD", "NO PAGA PENSION"
+    }),
+
+    // Confirmar tipo final
+    #"Tipo cambiado3" = Table.TransformColumnTypes(#"Columnas quitadas3", {{"cedulas", Int64.Type}})
+in
+    #"Tipo cambiado3"
+
+let
+    // Cargar la lista de nombres femeninos
+    FuenteNombres = Excel.Workbook(File.Contents("C:\Users\henry.estevez\Desktop\BDUA\NOMBRES FEMENINOS.xlsx"), null, true),
+    Hoja1_Sheet = FuenteNombres{[Item="Hoja1",Kind="Sheet"]}[Data],
+    TipoCambiadoNombres = Table.TransformColumnTypes(Hoja1_Sheet,{{"Column1", type text}}),
+    EncabezadosPromovidos = Table.PromoteHeaders(TipoCambiadoNombres, [PromoteAllScalars=true]),
+    TipoCambiadoFinal = Table.TransformColumnTypes(EncabezadosPromovidos,{{"NOMBRES FEMENINOS", type text}}),
+    NombresRenombrado = Table.RenameColumns(TipoCambiadoFinal,{{"NOMBRES FEMENINOS", "NOMBRES"}}),
+    ListaNombresFemeninos = NombresRenombrado[NOMBRES],
+
+    // Cargar y procesar CONSULTA_BDUA
+    Origen = Excel.CurrentWorkbook(){[Name="CONSULTA_BDUA"]}[Content],
+    #"Tipo cambiado" = Table.TransformColumnTypes(
+        Origen,
+        {
+            {"CCF", type text},
+            {"NUMERO_RADICADO", type text},
+            {"TIPO_ID", type text},
+            {"NUMERO_DE_ID", Int64.Type},
+            {"DESCRIPCION", type text},
+            {"NOMBRE_BENEFICIARIO", type text},
+            {"CODIGO_EPS", type text},
+            {"FECHA_NACIMIENTO", type datetime},
+            {"GENERO", type text},
+            {"IDENTIFICACION_EMPLEADOR", Int64.Type},
+            {"FECHA_CESACION", type datetime},
+            {"DIGITO_VERIFICACION_EMPLEADOR", Int64.Type}
+        }
+    ),
+    #"Columnas reordenadas" = Table.ReorderColumns(
+        #"Tipo cambiado",
+        {
+            "DESCRIPCION", "CCF", "NUMERO_RADICADO", "TIPO_ID", "NUMERO_DE_ID",
+            "NOMBRE_BENEFICIARIO", "CODIGO_EPS", "FECHA_NACIMIENTO", "GENERO",
+            "IDENTIFICACION_EMPLEADOR", "FECHA_CESACION", "DIGITO_VERIFICACION_EMPLEADOR"
+        }
+    ),
+    #"Columnas con nombre cambiado" = Table.RenameColumns(#"Columnas reordenadas",{{"DESCRIPCION", "ESTADO"}}),
+    #"Filas filtradas" = Table.SelectRows(#"Columnas con nombre cambiado", each ([ESTADO] = "ACTIVA" or [ESTADO] = "EN ESPERA")),
+    #"Columnas quitadas" = Table.RemoveColumns(#"Filas filtradas",{"NUMERO_RADICADO"}),
+    #"Columnas con nombre cambiado1" = Table.RenameColumns(#"Columnas quitadas",{{"CODIGO_EPS", "EPS_POST"}}),
+    #"Columnas quitadas1" = Table.RemoveColumns(#"Columnas con nombre cambiado1",{"IDENTIFICACION_EMPLEADOR", "FECHA_CESACION", "DIGITO_VERIFICACION_EMPLEADOR"}),
+
+    // Unión con Reporte_Empleados_Bdua_Ruaf
+    #"Consultas combinadas" = Table.NestedJoin(#"Columnas quitadas1", {"NUMERO_DE_ID"}, #"Reporte_Empleados_Bdua_Ruaf", {"cedulas"}, "Reporte_Empleados_Bdua_Ruaf", JoinKind.FullOuter),
+    #"Se expandió Reporte_Empleados_Bdua_Ruaf" = Table.ExpandTableColumn(#"Consultas combinadas", "Reporte_Empleados_Bdua_Ruaf", {"cedulas", "EPS_BDUA", "Fecha afiliación", "Coincidencia", "VALIDACION"}, {"Reporte_Empleados_Bdua_Ruaf.cedulas", "Reporte_Empleados_Bdua_Ruaf.EPS_BDUA", "Reporte_Empleados_Bdua_Ruaf.Fecha afiliación", "Reporte_Empleados_Bdua_Ruaf.Coincidencia", "Reporte_Empleados_Bdua_Ruaf.VALIDACION"}),
+    #"Columnas quitadas2" = Table.RemoveColumns(#"Se expandió Reporte_Empleados_Bdua_Ruaf",{"Reporte_Empleados_Bdua_Ruaf.cedulas"}),
+    #"Columnas reordenadas1" = Table.ReorderColumns(#"Columnas quitadas2",{"ESTADO", "CCF", "TIPO_ID", "NUMERO_DE_ID", "NOMBRE_BENEFICIARIO", "EPS_POST", "Reporte_Empleados_Bdua_Ruaf.EPS_BDUA", "Reporte_Empleados_Bdua_Ruaf.Fecha afiliación", "Reporte_Empleados_Bdua_Ruaf.Coincidencia", "Reporte_Empleados_Bdua_Ruaf.VALIDACION", "FECHA_NACIMIENTO", "GENERO"}),
+    #"Columnas con nombre cambiado2" = Table.RenameColumns(#"Columnas reordenadas1",{{"Reporte_Empleados_Bdua_Ruaf.VALIDACION", "(NO) APORTA A PENSION"}, {"Reporte_Empleados_Bdua_Ruaf.EPS_BDUA", "EPS_BDUA"}, {"Reporte_Empleados_Bdua_Ruaf.Fecha afiliación", "FECHA AFILIACION"}, {"Reporte_Empleados_Bdua_Ruaf.Coincidencia", "CONCIDENCIA"}}),
+    #"Columna condicional agregada" = Table.AddColumn(#"Columnas con nombre cambiado2", "CRUCE", each if [EPS_POST] = [EPS_BDUA] then "VERDADERO" else "FALSO"),
+    #"Columnas reordenadas2" = Table.ReorderColumns(#"Columna condicional agregada",{"ESTADO", "CCF", "TIPO_ID", "NUMERO_DE_ID", "NOMBRE_BENEFICIARIO", "EPS_POST", "EPS_BDUA", "FECHA AFILIACION", "CONCIDENCIA", "CRUCE", "(NO) APORTA A PENSION", "FECHA_NACIMIENTO", "GENERO"}),
+    #"Columna condicional agregada1" = Table.AddColumn(#"Columnas reordenadas2", "EPS_BDUA1", each if [EPS_BDUA] = "" then "SIN AFILIACION BDUA" else [EPS_BDUA]),
+    #"Columnas reordenadas3" = Table.ReorderColumns(#"Columna condicional agregada1",{"ESTADO", "CCF", "TIPO_ID", "NUMERO_DE_ID", "NOMBRE_BENEFICIARIO", "EPS_POST", "EPS_BDUA", "EPS_BDUA1", "FECHA AFILIACION", "CONCIDENCIA", "CRUCE", "(NO) APORTA A PENSION", "FECHA_NACIMIENTO", "GENERO"}),
+    #"Columna condicional agregada2" = Table.AddColumn(#"Columnas reordenadas3", "FECHA AFILIACION1", each if [EPS_BDUA] = "" then "SIN AFILIACION BDUA" else [FECHA AFILIACION]),
+    #"Columna condicional agregada3" = Table.AddColumn(#"Columna condicional agregada2", "COINCIDENCIA1", each if [EPS_BDUA] = "" then "SIN AFILIACION BDUA" else [CONCIDENCIA]),
+    #"Columna condicional agregada4" = Table.AddColumn(#"Columna condicional agregada3", "CRUCE1", each if [EPS_BDUA] = "" then "SIN AFILIACION BDUA" else [CRUCE]),
+    #"Columnas quitadas3" = Table.RemoveColumns(#"Columna condicional agregada4",{"FECHA AFILIACION", "CONCIDENCIA", "CRUCE", "EPS_BDUA"}),
+    #"Columnas con nombre cambiado3" = Table.RenameColumns(#"Columnas quitadas3",{{"EPS_BDUA1", "EPS_BDUA"}, {"FECHA AFILIACION1", "FECHA AFILIACION"}, {"COINCIDENCIA1", "COINCIDENCIA"}, {"CRUCE1", "CRUCE"}}),
+    #"Valor reemplazado" = Table.ReplaceValue(#"Columnas con nombre cambiado3","VERDADERO","EPS COINCIDE",Replacer.ReplaceText,{"CRUCE"}),
+    #"Valor reemplazado1" = Table.ReplaceValue(#"Valor reemplazado","FALSO","CRUCE BDUA",Replacer.ReplaceText,{"CRUCE"}),
+
+    // Cálculo de edad
+    #"Personalizada agregada" = Table.AddColumn(#"Valor reemplazado1", "EDAD", each 
+        let
+            hoy = DateTime.Date(DateTime.LocalNow()),
+            edad = Date.Year(hoy) - Date.Year([FECHA_NACIMIENTO]),
+            cumpleEsteAño = Date.From(Date.AddYears([FECHA_NACIMIENTO], edad)) > hoy,
+            edadFinal = if cumpleEsteAño then edad - 1 else edad
+        in edadFinal
+    ),
+
+    // Cálculo de cumplimiento por edad
+    #"Personalizada agregada1" = Table.AddColumn(#"Personalizada agregada", "CUMPLE", each if ([GENERO] = "F" and [EDAD] >= 57) or ([GENERO] = "M" and [EDAD] >= 62) then "EDAD CUMPLIDA" else "EDAD NO CUMPLIDA"),
+
+    // Ajuste de género con lista de nombres
+    #"Columnas reordenadas7" = Table.ReorderColumns(#"Personalizada agregada1",{"ESTADO", "CCF", "TIPO_ID", "NUMERO_DE_ID", "NOMBRE_BENEFICIARIO", "EPS_POST", "EPS_BDUA", "FECHA AFILIACION", "COINCIDENCIA", "CRUCE", "(NO) APORTA A PENSION", "FECHA_NACIMIENTO", "GENERO", "CUMPLE", "EDAD"}),
+    #"Personalizada agregada2" = Table.AddColumn(#"Columnas reordenadas7", "GENERO_AJUSTADO", each 
+        let
+            texto = Text.Upper([NOMBRE_BENEFICIARIO]),
+            coincidencias = List.Select(ListaNombresFemeninos, each Text.Contains(texto, Text.Upper(_)))
+        in
+            if [GENERO] = "I" and List.Count(coincidencias) > 0 then "F" else [GENERO]
+    ),
+    #"Filas filtradas1" = Table.SelectRows(#"Personalizada agregada2", each ([EPS_BDUA] = "SIN AFILIACION BDUA")),
+    #"Columnas quitadas4" = Table.RemoveColumns(#"Filas filtradas1",{"FECHA_NACIMIENTO", "GENERO", "CUMPLE", "EDAD", "GENERO_AJUSTADO", "CRUCE", "(NO) APORTA A PENSION"})
+in
+    #"Columnas quitadas4"
+    
+
+
+
+
